@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/alexflint/go-arg"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -32,26 +33,28 @@ func proxy(c *gin.Context) {
 }
 
 var args struct {
-	Port       int    `arg:"-p,--port,help:port to listen on" default:"8080"`
-	StaticPath string `arg:"-s,--static-path,help:directory to serve static files from" default:"../ultimate-monitor/dist"`
-	Dev        bool   `arg:"-d,--dev-mode,help:run in development mode" default:"false"`
-	DevPort    int    `arg:"--dev-port,help:port to run the development server on" default:"5173"`
+	Port        int    `arg:"-p,--port,help:port to listen on" default:"8080"`
+	StaticPath  string `arg:"-s,--static-path,help:directory to serve static files from" default:"../ultimate-monitor/dist"`
+	Dev         bool   `arg:"-d,--dev-mode,help:run in development mode" default:"false"`
+	DevPort     int    `arg:"--dev-port,help:port to run the development server on" default:"5173"`
+	ProjectPath string `arg:"-b,--project-path,help:project path" default:"."`
 }
 
 func main() {
 	arg.MustParse(&args)
 
 	apiEngine := gin.New()
-	apiG := apiEngine.Group("/api")
-	{
-		apiG.GET("/ping", func(c *gin.Context) {
-			c.JSON(200, gin.H{
-				"message": "pong",
-			})
-		})
-	}
+	InitApi(apiEngine)
+	InitProject(args.ProjectPath)
 
 	r := gin.New()
+	r.Use(cors.New(cors.Config{
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		AllowAllOrigins:  true,
+	}))
 
 	var wildcardHandler gin.HandlerFunc
 	if args.Dev {
