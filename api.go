@@ -164,6 +164,7 @@ func initSingleResultGroup(group *gin.RouterGroup) *gin.RouterGroup {
 			resultId := c.Param("resultId")
 			fileType := c.Param("type")
 			after := c.Query("after")
+			limit := c.Query("limit")
 			afterEpoch := -1
 			if after != "" {
 				num, err := strconv.Atoi(after)
@@ -175,6 +176,18 @@ func initSingleResultGroup(group *gin.RouterGroup) *gin.RouterGroup {
 					return
 				}
 				afterEpoch = num
+			}
+			limitCount := 10000
+			if limit != "" {
+				num, err := strconv.Atoi(limit)
+				if err != nil {
+					c.JSON(400, gin.H{
+						"status":  "error",
+						"message": err.Error(),
+					})
+					return
+				}
+				limitCount = num
 			}
 
 			exp, ok := experiments[id]
@@ -206,7 +219,7 @@ func initSingleResultGroup(group *gin.RouterGroup) *gin.RouterGroup {
 
 			switch fileType {
 			case "pcs":
-				err = result.AccessPcs(c.Writer, afterEpoch)
+				err = result.AccessPcs(c.Writer, afterEpoch, limitCount)
 				if err != nil {
 					c.JSON(404, gin.H{
 						"status":  "error",
@@ -214,7 +227,7 @@ func initSingleResultGroup(group *gin.RouterGroup) *gin.RouterGroup {
 					})
 				}
 			case "objs":
-				err = result.AccessObjs(c.Writer, afterEpoch)
+				err = result.AccessObjs(c.Writer, afterEpoch, limitCount)
 				if err != nil {
 					c.JSON(404, gin.H{
 						"status":  "error",

@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
 	"os"
 	"path"
+	"strings"
 	"sync"
 )
 
@@ -85,6 +87,8 @@ type Shape struct {
 
 	InitConfig *ShapeInitConfig
 	Boundaries []Boundary
+
+	Watcher *fsnotify.Watcher
 }
 
 func NewShape(shapePath string) *Shape {
@@ -93,6 +97,7 @@ func NewShape(shapePath string) *Shape {
 		Name: path.Base(shapePath),
 	}
 	shape.Refresh()
+	shape.Watch()
 
 	return shape
 }
@@ -102,8 +107,10 @@ func (s *Shape) Refresh() {
 	config, err := loadShapeConfig(s.Path)
 	if err != nil {
 		newConfig := &ShapeInitConfig{
+			PreferredType: "spheres",
+			PositiveRatio: 1.0,
 			PositiveSpheres: []Sphere{
-				{Center: []float32{0.0, 0.0, 0.0}, Radius: 0.0},
+				{Center: []float32{0.0, 0.0, 0.0}, Radius: 0.3, Ratio: 1.0},
 			},
 		}
 		err := saveShapeConfig(s.Path, newConfig)
@@ -115,19 +122,63 @@ func (s *Shape) Refresh() {
 	s.InitConfig = config
 }
 
-func (r *Shape) GetMeshFileName() string {
-	return path.Join(r.Path, "surface_normalized.obj")
+func (s *Shape) GetMeshFileName() string {
+	return path.Join(s.Path, "surface_normalized.obj")
 }
 
-func (r *Shape) AccessBoundary(w http.ResponseWriter, sampleCount int) error {
+func (s *Shape) AccessBoundary(w http.ResponseWriter, sampleCount int) error {
 	var paths []string
-	for _, boundary := range r.Boundaries {
+	for _, boundary := range s.Boundaries {
 		if boundary.SampleCount == sampleCount {
-			paths = append(paths, path.Join(r.Path, boundary.Name))
+			boundaryPath := path.Join(s.Path, boundary.Name)
+			paths = append(paths, boundaryPath)
+
+			octTreeFileName := strings.Replace(boundary.Name, "boundary", "octTree", -1)
+			octTreeFileName = strings.Replace(octTreeFileName, "ply", "obj", -1)
+			octTreePath := path.Join(s.Path, octTreeFileName)
+			log.Println(octTreePath)
+			if _, err := os.Stat(octTreePath); err == nil {
+				paths = append(paths, octTreePath)
+			}
 		}
 	}
 	err := packFilesIntoResponse(w, paths)
 	return err
+}
+
+func (s *Shape) Watch() {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	s.Watcher = watcher
+
+	go func() {
+		defer watcher.Close()
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				//log.Printf("Event: %s %d", event.Name, event.Op)
+				if event.Has(fsnotify.Create | fsnotify.Remove) {
+					s.Refresh()
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Println("Error:", err)
+			}
+		}
+	}()
+
+	err = watcher.Add(s.Path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Shape Watching: %s", s.Path)
 }
 
 type Boundary struct {
@@ -139,9 +190,12 @@ type Boundary struct {
 type Sphere struct {
 	Center []float32 `json:"center"`
 	Radius float32   `json:"radius"`
+	Ratio  float32   `json:"ratio"`
 }
 
 type ShapeInitConfig struct {
+	PreferredType   string   `json:"preferredType"`
+	PositiveRatio   float32  `json:"positiveRatio"`
 	PositiveSpheres []Sphere `json:"positiveSpheres"`
 }
 

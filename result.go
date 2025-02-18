@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -22,12 +23,20 @@ type Result struct {
 	Objs []ResultRecord
 
 	Watcher *fsnotify.Watcher
+
+	PcUpdateCh chan bool
 }
 
 type ResultRecord struct {
 	epoch int
 	Name  string
 }
+
+type ByEpoch []ResultRecord
+
+func (a ByEpoch) Len() int           { return len(a) }
+func (a ByEpoch) Less(i, j int) bool { return a[i].epoch < a[j].epoch }
+func (a ByEpoch) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
 func getAllPcs(pcPath string) []ResultRecord {
 	// get all the file names in pcPath
@@ -48,6 +57,7 @@ func getAllPcs(pcPath string) []ResultRecord {
 			}
 		}
 	}
+	sort.Sort(ByEpoch(pcs))
 	return pcs
 }
 
@@ -70,13 +80,15 @@ func getAllObjs(objPath string, objIndex int) []ResultRecord {
 			}
 		}
 	}
+	sort.Sort(ByEpoch(objs))
 	return objs
 }
 
 func NewResult(expPath string, objIndex int, exp *Experiment) *Result {
 	result := &Result{
-		ObjIndex: objIndex,
-		Exp:      *exp,
+		ObjIndex:   objIndex,
+		Exp:        *exp,
+		PcUpdateCh: make(chan bool),
 	}
 	result.UpdateExpPath(expPath)
 
@@ -108,23 +120,25 @@ func (r *Result) RefreshObjs() {
 	r.Objs = getAllObjs(r.ObjPath, r.ObjIndex)
 }
 
-func (r *Result) AccessPcs(w http.ResponseWriter, afterEpoch int) error {
+func (r *Result) AccessPcs(w http.ResponseWriter, afterEpoch, limit int) error {
 	var paths []string
-	for _, pc := range r.Pcs {
-		if pc.epoch > afterEpoch {
-			paths = append(paths, filepath.Join(r.PcPath, pc.Name))
-		}
+	start := sort.Search(len(r.Pcs), func(i int) bool {
+		return r.Pcs[i].epoch > afterEpoch
+	})
+	for _, pc := range r.Pcs[start : start+limit] {
+		paths = append(paths, filepath.Join(r.PcPath, pc.Name))
 	}
 	err := packFilesIntoResponse(w, paths)
 	return err
 }
 
-func (r *Result) AccessObjs(w http.ResponseWriter, afterEpoch int) error {
+func (r *Result) AccessObjs(w http.ResponseWriter, afterEpoch, limit int) error {
 	var paths []string
-	for _, obj := range r.Objs {
-		if obj.epoch > afterEpoch {
-			paths = append(paths, filepath.Join(r.ObjPath, obj.Name))
-		}
+	start := sort.Search(len(r.Pcs), func(i int) bool {
+		return r.Pcs[i].epoch > afterEpoch
+	})
+	for _, obj := range r.Objs[start : start+limit] {
+		paths = append(paths, filepath.Join(r.ObjPath, obj.Name))
 	}
 	err := packFilesIntoResponse(w, paths)
 	return err
@@ -147,7 +161,7 @@ func (r *Result) WatchPcs() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if info.ModTime().Add(time.Minute*10).Unix() < time.Now().Unix() {
+	if info.ModTime().Add(time.Hour*4).Unix() < time.Now().Unix() {
 		return
 	}
 
@@ -171,14 +185,22 @@ func (r *Result) WatchPcs() {
 						return
 					}
 					if event.Has(fsnotify.Create) {
-						r.RefreshPcs()
+						select {
+						case r.PcUpdateCh <- true:
+							go func() {
+								<-time.After(time.Second)
+								<-r.PcUpdateCh
+								r.RefreshPcs()
+							}()
+						default:
+						}
 					}
 				case err, ok := <-watcher.Errors:
 					if !ok {
 						return
 					}
 					log.Println("Error:", err)
-				case <-time.After(time.Second * 10):
+				case <-time.After(time.Minute * 10):
 					log.Printf("Timed out, assuming that the experiment has stopped %s", r.PcPath)
 					return
 				}

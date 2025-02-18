@@ -10,6 +10,7 @@ var pcFolderRE = regexp.MustCompile(`debug_(\d+)`)
 var pcFileRE = regexp.MustCompile(`debug_ep(\d+)_pc_(\d+)\.ply`)
 var objFileRE = regexp.MustCompile(`obj(\d+)_ep(\d+)_mesh\.obj`)
 var boundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_s=(\d+).ply`)
+var newBoundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_noise_[\d.]+_s=(\d+).ply`)
 var fixedLengthStrRE = regexp.MustCompile(`<U(\d+)`)
 
 func matchPcFolder(folderName string) (int, bool) {
@@ -58,6 +59,9 @@ func matchObjFile(filename string) (int, int, bool) {
 
 func matchBDFile(filename string) (float64, int, bool) {
 	matches := boundaryFileRE.FindStringSubmatch(filename)
+	if matches == nil {
+		matches = newBoundaryFileRE.FindStringSubmatch(filename)
+	}
 	if len(matches) > 2 {
 		sigma, err := strconv.ParseFloat(matches[1], 64)
 		if err != nil {

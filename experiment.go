@@ -158,6 +158,9 @@ func (e *Experiment) UpdatePath(newPath string) {
 	}
 	e.Path = newPath
 	e.Watch()
+	for _, result := range e.Results {
+		result.UpdateExpPath(e.Path)
+	}
 }
 
 func (e *Experiment) Refresh() {
