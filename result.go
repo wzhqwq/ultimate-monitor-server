@@ -52,7 +52,7 @@ func getAllPcs(pcPath string) []ResultRecord {
 		}
 		if !info.IsDir() {
 			name := info.Name()
-			if epoch, _, ok := matchPcFile(name); ok {
+			if epoch, ok := matchPcFile(name); ok {
 				pcs = append(pcs, ResultRecord{epoch, name})
 			}
 		}
@@ -88,7 +88,7 @@ func NewResult(expPath string, objIndex int, exp *Experiment) *Result {
 	result := &Result{
 		ObjIndex:   objIndex,
 		Exp:        *exp,
-		PcUpdateCh: make(chan bool),
+		PcUpdateCh: make(chan bool, 1),
 	}
 	result.UpdateExpPath(expPath)
 
@@ -125,7 +125,11 @@ func (r *Result) AccessPcs(w http.ResponseWriter, afterEpoch, limit int) error {
 	start := sort.Search(len(r.Pcs), func(i int) bool {
 		return r.Pcs[i].epoch > afterEpoch
 	})
-	for _, pc := range r.Pcs[start : start+limit] {
+	end := start + limit
+	if end > len(r.Pcs) {
+		end = len(r.Pcs)
+	}
+	for _, pc := range r.Pcs[start:end] {
 		paths = append(paths, filepath.Join(r.PcPath, pc.Name))
 	}
 	err := packFilesIntoResponse(w, paths)
@@ -134,10 +138,14 @@ func (r *Result) AccessPcs(w http.ResponseWriter, afterEpoch, limit int) error {
 
 func (r *Result) AccessObjs(w http.ResponseWriter, afterEpoch, limit int) error {
 	var paths []string
-	start := sort.Search(len(r.Pcs), func(i int) bool {
-		return r.Pcs[i].epoch > afterEpoch
+	start := sort.Search(len(r.Objs), func(i int) bool {
+		return r.Objs[i].epoch > afterEpoch
 	})
-	for _, obj := range r.Objs[start : start+limit] {
+	end := start + limit
+	if end > len(r.Objs) {
+		end = len(r.Objs)
+	}
+	for _, obj := range r.Objs[start:end] {
 		paths = append(paths, filepath.Join(r.ObjPath, obj.Name))
 	}
 	err := packFilesIntoResponse(w, paths)

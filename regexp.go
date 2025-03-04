@@ -7,7 +7,7 @@ import (
 )
 
 var pcFolderRE = regexp.MustCompile(`debug_(\d+)`)
-var pcFileRE = regexp.MustCompile(`debug_ep(\d+)_pc_(\d+)\.ply`)
+var pcFileRE = regexp.MustCompile(`debug_ep(\d+).*\.ply`)
 var objFileRE = regexp.MustCompile(`obj(\d+)_ep(\d+)_mesh\.obj`)
 var boundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_s=(\d+).ply`)
 var newBoundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_noise_[\d.]+_s=(\d+).ply`)
@@ -25,20 +25,16 @@ func matchPcFolder(folderName string) (int, bool) {
 	return 0, false
 }
 
-func matchPcFile(filename string) (int, int, bool) {
+func matchPcFile(filename string) (int, bool) {
 	matches := pcFileRE.FindStringSubmatch(filename)
-	if len(matches) > 2 {
+	if len(matches) > 1 {
 		epoch, err := strconv.Atoi(matches[1])
 		if err != nil {
 			log.Fatal(err)
 		}
-		count, err := strconv.Atoi(matches[2])
-		if err != nil {
-			log.Fatal(err)
-		}
-		return epoch, count, true
+		return epoch, true
 	}
-	return 0, 0, false
+	return 0, false
 }
 
 func matchObjFile(filename string) (int, int, bool) {

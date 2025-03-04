@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -25,22 +26,20 @@ type ExpFolderEntry struct {
 var baseEntry *ExpFolderEntry
 
 func NewEntry(p string, parent *ExpFolderEntry) *ExpFolderEntry {
-	checkpointsPath := path.Join(p, "checkpoints")
+	name := path.Base(p)
 	var entry *ExpFolderEntry
-	if _, err := os.Stat(checkpointsPath); os.IsNotExist(err) {
-		log.Printf("Found Folder: %s", p)
+	if matched, err := regexp.Match(`p=\d+`, []byte(p)); !matched || err != nil {
 		entry = &ExpFolderEntry{
 			Path:         p,
-			Name:         path.Base(p),
+			Name:         name,
 			Parent:       parent,
 			IsExperiment: false,
 		}
 		entry.Refresh()
 	} else {
-		log.Printf("Found Experiment: %s", p)
 		entry = &ExpFolderEntry{
 			Path:         p,
-			Name:         path.Base(p),
+			Name:         name,
 			Parent:       parent,
 			Experiment:   FindOrCreateExperiment(p),
 			IsExperiment: true,
