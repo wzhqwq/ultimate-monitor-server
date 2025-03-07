@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
@@ -53,19 +54,27 @@ func NewDataset(dataPath string) *Dataset {
 }
 
 func (d *Dataset) Refresh() {
-	npyPath := path.Join(d.Path, "objects.npy")
-	file, err := os.Open(npyPath)
+	sheetPath := path.Join(d.Path, "object_list.txt")
+	sheet, err := os.Open(sheetPath)
 	if err != nil {
 		log.Fatal(err)
 	}
-	paths, err := ReadNpyStrArray(file)
-	if err != nil {
-		log.Fatal(err)
+	// read lines of sheet text
+	defer sheet.Close()
+
+	var paths []string
+	scanner := bufio.NewScanner(sheet)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		paths = append(paths, line)
 	}
 
 	var shapes []*Shape
 	for _, shapePath := range paths {
-		shapes = append(shapes, NewShape(path.Join(d.Path, "..", shapePath)))
+		shapes = append(shapes, NewShape(path.Join(d.Path, shapePath)))
 	}
 	d.Shapes = shapes
 }
