@@ -46,12 +46,8 @@ func getAllPcs(pcPath string) []ResultRecord {
 	}
 	var pcs []ResultRecord
 	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			log.Fatal(err)
-		}
-		if !info.IsDir() {
-			name := info.Name()
+		if !entry.IsDir() {
+			name := entry.Name()
 			if epoch, ok := matchPcFile(name); ok {
 				pcs = append(pcs, ResultRecord{epoch, name})
 			}
