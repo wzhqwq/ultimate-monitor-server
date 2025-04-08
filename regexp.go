@@ -7,10 +7,10 @@ import (
 )
 
 var pcFolderRE = regexp.MustCompile(`debug_(\d+)`)
-var pcFileRE = regexp.MustCompile(`debug_ep(\d+).*\.ply`)
-var objFileRE = regexp.MustCompile(`obj(\d+)_ep(\d+)_mesh\.obj`)
-var boundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_s=(\d+).ply`)
-var newBoundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_noise_[\d.]+_s=(\d+).ply`)
+var pcFileRE = regexp.MustCompile(`debug_ep(\d+).*\.ply$`)
+var objFileRE = regexp.MustCompile(`obj(\d+)_ep(\d+)_mesh\.(?:obj|ply)$`)
+var boundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_s=(\d+).ply$`)
+var newBoundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_(?:noise_|outlier=)[\d.]+_s=(\d+).ply$`)
 var fixedLengthStrRE = regexp.MustCompile(`<U(\d+)`)
 
 func matchPcFolder(folderName string) (int, bool) {
