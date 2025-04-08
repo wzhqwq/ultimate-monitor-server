@@ -13,6 +13,9 @@ func InitApi(engine *gin.Engine) {
 				"message": "pong",
 			})
 		})
+		apiG.POST("/gif", func(c *gin.Context) {
+			convertToGif(c)
+		})
 		initFsGroup(apiG)
 		initExpGroup(apiG)
 		initWs(apiG)
