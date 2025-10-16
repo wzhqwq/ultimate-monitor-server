@@ -106,7 +106,7 @@ func NewShape(shapePath string) *Shape {
 		Name: path.Base(shapePath),
 	}
 	shape.Refresh()
-	shape.Watch()
+	//shape.Watch()
 
 	return shape
 }
@@ -114,10 +114,8 @@ func NewShape(shapePath string) *Shape {
 func (s *Shape) Refresh() {
 	s.Boundaries = getAllBoundaries(s.Path)
 	config, err := loadShapeConfig(s.Path)
-	if err != nil {
+	if os.IsNotExist(err) {
 		newConfig := &ShapeInitConfig{
-			PreferredType: "spheres",
-			PositiveRatio: 1.0,
 			PositiveSpheres: []Sphere{
 				{Center: []float32{0.0, 0.0, 0.0}, Radius: 0.3, Ratio: 1.0},
 			},
@@ -137,6 +135,7 @@ func (s *Shape) GetMeshFileName() string {
 
 func (s *Shape) AccessBoundary(w http.ResponseWriter, sampleCount int) error {
 	var paths []string
+	s.Refresh()
 	for _, boundary := range s.Boundaries {
 		if boundary.SampleCount == sampleCount {
 			boundaryPath := path.Join(s.Path, boundary.Name)
@@ -203,8 +202,6 @@ type Sphere struct {
 }
 
 type ShapeInitConfig struct {
-	PreferredType   string   `json:"preferredType"`
-	PositiveRatio   float32  `json:"positiveRatio"`
 	PositiveSpheres []Sphere `json:"positiveSpheres"`
 }
 

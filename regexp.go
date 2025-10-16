@@ -7,7 +7,9 @@ import (
 )
 
 var pcFolderRE = regexp.MustCompile(`debug_(\d+)`)
-var pcFileRE = regexp.MustCompile(`debug_ep(\d+).*\.ply$`)
+var pcFileRE = regexp.MustCompile(`debug_normal_ep(\d+).*\.ply$`)
+var particleFileRE = regexp.MustCompile(`debug_ep(\d+).*\.ply$`)
+var axisFileRE = regexp.MustCompile(`debug_axis_ep(\d+).*\.ply$`)
 var objFileRE = regexp.MustCompile(`obj(\d+)_ep(\d+)_mesh\.(?:obj|ply)$`)
 var boundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_s=(\d+).ply$`)
 var newBoundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_(?:noise_|outlier=)[\d.]+_s=(\d+).ply$`)
@@ -27,6 +29,30 @@ func matchPcFolder(folderName string) (int, bool) {
 
 func matchPcFile(filename string) (int, bool) {
 	matches := pcFileRE.FindStringSubmatch(filename)
+	if len(matches) > 1 {
+		epoch, err := strconv.Atoi(matches[1])
+		if err != nil {
+			log.Fatal(err)
+		}
+		return epoch, true
+	}
+	return 0, false
+}
+
+func matchParticleFile(filename string) (int, bool) {
+	matches := particleFileRE.FindStringSubmatch(filename)
+	if len(matches) > 1 {
+		epoch, err := strconv.Atoi(matches[1])
+		if err != nil {
+			log.Fatal(err)
+		}
+		return epoch, true
+	}
+	return 0, false
+}
+
+func matchAxisFile(filename string) (int, bool) {
+	matches := axisFileRE.FindStringSubmatch(filename)
 	if len(matches) > 1 {
 		epoch, err := strconv.Atoi(matches[1])
 		if err != nil {

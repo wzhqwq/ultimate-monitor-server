@@ -220,27 +220,11 @@ func initSingleResultGroup(group *gin.RouterGroup) *gin.RouterGroup {
 				return
 			}
 
-			switch fileType {
-			case "pcs":
-				err = result.AccessPcs(c.Writer, afterEpoch, limitCount)
-				if err != nil {
-					c.JSON(404, gin.H{
-						"status":  "error",
-						"message": err.Error(),
-					})
-				}
-			case "objs":
-				err = result.AccessObjs(c.Writer, afterEpoch, limitCount)
-				if err != nil {
-					c.JSON(404, gin.H{
-						"status":  "error",
-						"message": err.Error(),
-					})
-				}
-			default:
+			err = result.AccessFile(c.Writer, afterEpoch, limitCount, fileType)
+			if err != nil {
 				c.JSON(404, gin.H{
 					"status":  "error",
-					"message": "file type not supported",
+					"message": err.Error(),
 				})
 			}
 		})

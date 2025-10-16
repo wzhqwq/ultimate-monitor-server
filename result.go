@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
@@ -19,8 +20,10 @@ type Result struct {
 	PcPath  string
 	ObjPath string
 
-	Pcs  []ResultRecord
-	Objs []ResultRecord
+	Pcs       []ResultRecord
+	Particles []ResultRecord
+	Axis      []ResultRecord
+	Objs      []ResultRecord
 
 	Watcher *fsnotify.Watcher
 
@@ -37,25 +40,6 @@ type ByEpoch []ResultRecord
 func (a ByEpoch) Len() int           { return len(a) }
 func (a ByEpoch) Less(i, j int) bool { return a[i].epoch < a[j].epoch }
 func (a ByEpoch) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-
-func getAllPcs(pcPath string) []ResultRecord {
-	// get all the file names in pcPath
-	entries, err := os.ReadDir(pcPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var pcs []ResultRecord
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			name := entry.Name()
-			if epoch, ok := matchPcFile(name); ok {
-				pcs = append(pcs, ResultRecord{epoch, name})
-			}
-		}
-	}
-	sort.Sort(ByEpoch(pcs))
-	return pcs
-}
 
 func getAllObjs(objPath string, objIndex int) []ResultRecord {
 	// get all the file names in objPath
@@ -108,7 +92,33 @@ func (r *Result) Refresh() {
 }
 
 func (r *Result) RefreshPcs() {
-	r.Pcs = getAllPcs(r.PcPath)
+	// get all the file names in pcPath
+	entries, err := os.ReadDir(r.PcPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var pcs []ResultRecord
+	var particles []ResultRecord
+	var axis []ResultRecord
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			name := entry.Name()
+			if epoch, ok := matchPcFile(name); ok {
+				pcs = append(pcs, ResultRecord{epoch, name})
+			}
+			if epoch, ok := matchParticleFile(name); ok {
+				particles = append(particles, ResultRecord{epoch, name})
+			}
+			if epoch, ok := matchAxisFile(name); ok {
+				axis = append(axis, ResultRecord{epoch, name})
+			}
+		}
+	}
+	sort.Sort(ByEpoch(pcs))
+	sort.Sort(ByEpoch(particles))
+	sort.Sort(ByEpoch(axis))
+
+	r.Particles, r.Pcs, r.Axis = particles, pcs, axis
 	r.NotifyPcChanges()
 }
 
@@ -116,41 +126,44 @@ func (r *Result) RefreshObjs() {
 	r.Objs = getAllObjs(r.ObjPath, r.ObjIndex)
 }
 
-func (r *Result) AccessPcs(w http.ResponseWriter, afterEpoch, limit int) error {
+func (r *Result) AccessFile(w http.ResponseWriter, afterEpoch, limit int, category string) error {
 	var paths []string
-	start := sort.Search(len(r.Pcs), func(i int) bool {
-		return r.Pcs[i].epoch > afterEpoch
-	})
-	end := start + limit
-	if end > len(r.Pcs) {
-		end = len(r.Pcs)
-	}
-	for _, pc := range r.Pcs[start:end] {
-		paths = append(paths, filepath.Join(r.PcPath, pc.Name))
-	}
-	err := packFilesIntoResponse(w, paths)
-	return err
-}
+	var records []ResultRecord
+	var basePath = r.PcPath
 
-func (r *Result) AccessObjs(w http.ResponseWriter, afterEpoch, limit int) error {
-	var paths []string
-	start := sort.Search(len(r.Objs), func(i int) bool {
-		return r.Objs[i].epoch > afterEpoch
-	})
+	switch category {
+	case "pcs":
+		records = r.Pcs
+	case "axis":
+		records = r.Axis
+	case "particles":
+		records = r.Particles
+	case "objs":
+		records = r.Objs
+		basePath = r.ObjPath
+	default:
+		return errors.New("unknown category")
+	}
+
+	start := sort.Search(
+		len(records),
+		func(i int) bool {
+			return records[i].epoch > afterEpoch
+		},
+	)
 	end := start + limit
-	if end > len(r.Objs) {
-		end = len(r.Objs)
+	if end > len(records) {
+		end = len(records)
 	}
-	for _, obj := range r.Objs[start:end] {
-		paths = append(paths, filepath.Join(r.ObjPath, obj.Name))
+	for _, pc := range records[start:end] {
+		paths = append(paths, filepath.Join(basePath, pc.Name))
 	}
-	err := packFilesIntoResponse(w, paths)
-	return err
+	return packFilesIntoResponse(w, paths)
 }
 
 func (r *Result) NotifyPcChanges() {
 	maxEpoch := 0
-	for _, pc := range r.Pcs {
+	for _, pc := range r.Particles {
 		maxEpoch = max(maxEpoch, pc.epoch)
 	}
 	sessions.Notify(GenerateMessage("PC_CHANGE", gin.H{
