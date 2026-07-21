@@ -3,14 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
 	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
-	"time"
+	"strconv"
+	"strings"
 )
 
 type Result struct {
@@ -20,14 +20,18 @@ type Result struct {
 	PcPath  string
 	ObjPath string
 
-	Pcs       []ResultRecord
-	Particles []ResultRecord
-	Axis      []ResultRecord
-	Objs      []ResultRecord
+	active          bool
+	debugInterval   int
+	maxEpoch        int
+	startEpoch      int
+	hasExternalPc   bool
+	hasExternalAxis bool
 
-	Watcher *fsnotify.Watcher
+	particleFileTemplate string
+	pcFileTemplate       string
+	axisFileTemplate     string
 
-	PcUpdateCh chan bool
+	Objs []ResultRecord
 }
 
 type ResultRecord struct {
@@ -66,9 +70,8 @@ func getAllObjs(objPath string, objIndex int) []ResultRecord {
 
 func NewResult(expPath string, objIndex int, exp *Experiment) *Result {
 	result := &Result{
-		ObjIndex:   objIndex,
-		Exp:        *exp,
-		PcUpdateCh: make(chan bool, 1),
+		ObjIndex: objIndex,
+		Exp:      *exp,
 	}
 	result.UpdateExpPath(expPath)
 
@@ -82,7 +85,6 @@ func (r *Result) UpdateExpPath(expPath string) {
 	r.PcPath = pcPath
 	r.ObjPath = expPath
 
-	r.WatchPcs()
 	r.Refresh()
 }
 
@@ -91,7 +93,18 @@ func (r *Result) Refresh() {
 	r.RefreshObjs()
 }
 
+func (r *Result) SetActive(active bool) {
+	if active && !r.active {
+		r.debugInterval = 0
+	}
+	r.active = active
+}
+
 func (r *Result) RefreshPcs() {
+	if r.debugInterval > 0 {
+		return
+	}
+
 	// get all the file names in pcPath
 	entries, err := os.ReadDir(r.PcPath)
 	if err != nil {
@@ -114,12 +127,26 @@ func (r *Result) RefreshPcs() {
 			}
 		}
 	}
-	sort.Sort(ByEpoch(pcs))
-	sort.Sort(ByEpoch(particles))
-	sort.Sort(ByEpoch(axis))
 
-	r.Particles, r.Pcs, r.Axis = particles, pcs, axis
-	r.NotifyPcChanges()
+	if len(particles) > 1 {
+		sort.Sort(ByEpoch(particles))
+		r.debugInterval = particles[1].epoch - particles[0].epoch
+		r.particleFileTemplate = particleFileReplaceRE.ReplaceAllString(particles[0].Name, "$1<EPOCH>$2")
+		r.maxEpoch = particles[len(particles)-1].epoch
+		r.startEpoch = particles[0].epoch
+	}
+	if len(pcs) > 0 {
+		r.hasExternalPc = true
+		r.pcFileTemplate = pcFileReplaceRE.ReplaceAllString(pcs[0].Name, "$1<EPOCH>$2")
+	} else {
+		r.hasExternalPc = false
+	}
+	if len(axis) > 0 {
+		r.hasExternalAxis = true
+		r.axisFileTemplate = axisFileReplaceRE.ReplaceAllString(axis[0].Name, "$1<EPOCH>$2")
+	} else {
+		r.hasExternalAxis = false
+	}
 }
 
 func (r *Result) RefreshObjs() {
@@ -127,23 +154,57 @@ func (r *Result) RefreshObjs() {
 }
 
 func (r *Result) AccessFile(w http.ResponseWriter, afterEpoch, limit int, category string) error {
-	var paths []string
-	var records []ResultRecord
-	var basePath = r.PcPath
-
 	switch category {
-	case "pcs":
-		records = r.Pcs
-	case "axis":
-		records = r.Axis
-	case "particles":
-		records = r.Particles
+	case "pcs", "axis", "particles":
+		return packFilesIntoResponse(w, r.GetDebugOutputPaths(category, afterEpoch, limit))
 	case "objs":
-		records = r.Objs
-		basePath = r.ObjPath
+		return packFilesIntoResponse(w, r.GetCheckpointOutputPaths(category, afterEpoch, limit))
 	default:
 		return errors.New("unknown category")
 	}
+}
+
+func (r *Result) GetDebugOutputPaths(category string, afterEpoch, limit int) []string {
+	if r.debugInterval == 0 {
+		return nil
+	}
+
+	var paths []string
+	var template string
+
+	switch category {
+	case "pcs":
+		if !r.hasExternalPc {
+			return nil
+		}
+		template = r.pcFileTemplate
+	case "axis":
+		if !r.hasExternalAxis {
+			return nil
+		}
+		template = r.axisFileTemplate
+	case "particles":
+		template = r.particleFileTemplate
+	}
+
+	epoch := r.startEpoch
+	if afterEpoch >= 0 {
+		epoch = afterEpoch + r.debugInterval
+	}
+	for i := 0; i < limit; i++ {
+		if epoch > r.maxEpoch {
+			break
+		}
+		paths = append(paths, filepath.Join(r.PcPath, strings.Replace(template, "<EPOCH>", strconv.Itoa(epoch), 1)))
+		epoch += r.debugInterval
+	}
+
+	return paths
+}
+
+func (r *Result) GetCheckpointOutputPaths(category string, afterEpoch, limit int) []string {
+	var paths []string
+	records := r.Objs
 
 	start := sort.Search(
 		len(records),
@@ -156,79 +217,17 @@ func (r *Result) AccessFile(w http.ResponseWriter, afterEpoch, limit int, catego
 		end = len(records)
 	}
 	for _, pc := range records[start:end] {
-		paths = append(paths, filepath.Join(basePath, pc.Name))
+		paths = append(paths, filepath.Join(r.ObjPath, pc.Name))
 	}
-	return packFilesIntoResponse(w, paths)
+
+	return paths
 }
 
-func (r *Result) NotifyPcChanges() {
-	maxEpoch := 0
-	for _, pc := range r.Particles {
-		maxEpoch = max(maxEpoch, pc.epoch)
-	}
+func (r *Result) NotifyPcChanges(maxEpoch int) {
+	r.maxEpoch = maxEpoch
 	sessions.Notify(GenerateMessage("PC_CHANGE", gin.H{
 		"max_epoch":    maxEpoch,
 		"exp_id":       r.Exp.Info.ID,
 		"object_index": r.ObjIndex,
 	}))
-}
-
-func (r *Result) WatchPcs() {
-	info, err := os.Stat(r.PcPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if info.ModTime().Add(time.Hour*4).Unix() < time.Now().Unix() {
-		return
-	}
-
-	if r.Watcher == nil {
-		watcher, err := fsnotify.NewWatcher()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		r.Watcher = watcher
-
-		go func() {
-			defer func() {
-				r.Watcher.Close()
-				r.Watcher = nil
-			}()
-			for {
-				select {
-				case event, ok := <-watcher.Events:
-					if !ok {
-						return
-					}
-					if event.Has(fsnotify.Create) {
-						select {
-						case r.PcUpdateCh <- true:
-							go func() {
-								<-time.After(time.Second)
-								<-r.PcUpdateCh
-								r.RefreshPcs()
-							}()
-						default:
-						}
-					}
-				case err, ok := <-watcher.Errors:
-					if !ok {
-						return
-					}
-					log.Println("Error:", err)
-				case <-time.After(time.Minute * 10):
-					log.Printf("Timed out, assuming that the experiment has stopped %s", r.PcPath)
-					return
-				}
-			}
-		}()
-	}
-
-	err = r.Watcher.Add(r.PcPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Printf("Result Pcs Watching: %s", r.PcPath)
 }

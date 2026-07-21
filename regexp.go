@@ -15,6 +15,10 @@ var boundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_s=(\d+).ply$`)
 var newBoundaryFileRE = regexp.MustCompile(`boundary_sigma=([\d.]+)_(?:noise_|outlier=)[\d.]+_s=(\d+).ply$`)
 var fixedLengthStrRE = regexp.MustCompile(`<U(\d+)`)
 
+var particleFileReplaceRE = regexp.MustCompile(`(debug_ep)\d+(.*\.ply)$`)
+var pcFileReplaceRE = regexp.MustCompile(`(debug_normal_ep)\d+(.*\.ply)$`)
+var axisFileReplaceRE = regexp.MustCompile(`(debug_axis_ep)\d+(.*\.ply)$`)
+
 func matchPcFolder(folderName string) (int, bool) {
 	matches := pcFolderRE.FindStringSubmatch(folderName)
 	if len(matches) > 1 {

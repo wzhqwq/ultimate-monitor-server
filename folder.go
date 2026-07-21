@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -22,8 +23,6 @@ type ExpFolderEntry struct {
 
 	Watcher *fsnotify.Watcher
 }
-
-var baseEntry *ExpFolderEntry
 
 func NewEntry(p string, parent *ExpFolderEntry) *ExpFolderEntry {
 	name := path.Base(p)
@@ -45,7 +44,6 @@ func NewEntry(p string, parent *ExpFolderEntry) *ExpFolderEntry {
 			IsExperiment: true,
 		}
 	}
-	entry.Watch()
 	return entry
 }
 
@@ -57,13 +55,13 @@ func (e *ExpFolderEntry) Refresh() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	var items []*ExpFolderEntry
+	items := []*ExpFolderEntry{}
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
 			log.Fatal(err)
 		}
-		if info.IsDir() {
+		if info.IsDir() && info.Name() != "sessions" {
 			items = append(items, NewEntry(path.Join(e.Path, info.Name()), e))
 		}
 	}
@@ -128,43 +126,28 @@ func (e *ExpFolderEntry) Find(path string) *ExpFolderEntry {
 	return nil
 }
 
-func (e *ExpFolderEntry) Watch() {
-	if e.IsExperiment {
-		return
-	}
-
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Fatal(err)
-	}
-	e.Watcher = watcher
-
-	go func() {
-		defer watcher.Close()
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				//log.Printf("Event: %s %d", event.Name, event.Op)
-				if event.Has(fsnotify.Create | fsnotify.Remove) {
-					e.Refresh()
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Println("Error:", err)
+func (e *ExpFolderEntry) FindOrCreate(path string) *ExpFolderEntry {
+	split := strings.SplitN(path, "/", 2)
+	for _, entry := range e.Items {
+		if entry.Name == split[0] {
+			if len(split) == 2 {
+				return entry.FindOrCreate(split[1])
+			} else {
+				return entry
 			}
 		}
-	}()
-
-	err = watcher.Add(e.Path)
-	if err != nil {
-		log.Fatal(err)
 	}
-	log.Printf("ExpFolderEntry Watching: %s", e.Path)
+	stat, err := os.Stat(filepath.Join(e.Path, split[0]))
+	if err != nil {
+		return nil
+	}
+	if stat.IsDir() {
+		entry := NewEntry(filepath.Join(e.Path, split[0]), e)
+		e.Items = append(e.Items, entry)
+		e.NotifyChange()
+		return entry
+	}
+	return nil
 }
 
 func (e *ExpFolderEntry) NotifyChange() {

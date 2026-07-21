@@ -13,8 +13,6 @@ import (
 	"sync"
 )
 
-var currentDataset *Dataset
-
 func getAllBoundaries(path string) []Boundary {
 	// get all the file names in pcPath
 	entries, err := os.ReadDir(path)
@@ -157,7 +155,8 @@ func (s *Shape) AccessBoundary(w http.ResponseWriter, sampleCount int) error {
 func (s *Shape) Watch() {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Failed to watch: ", err)
+		return
 	}
 	s.Watcher = watcher
 
@@ -184,7 +183,8 @@ func (s *Shape) Watch() {
 
 	err = watcher.Add(s.Path)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Failed to watch: ", err)
+		return
 	}
 	log.Printf("Shape Watching: %s", s.Path)
 }

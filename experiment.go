@@ -2,12 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/fsnotify/fsnotify"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"log"
 	"os"
 	"path"
+	"path/filepath"
 )
 
 var experiments = make(map[string]*Experiment)
@@ -58,8 +59,6 @@ type Experiment struct {
 	Path    string
 	Results map[int]*Result
 	Info    *ExperimentInfo
-
-	Watcher *fsnotify.Watcher
 }
 
 func FindOrCreateExperiment(path string) *Experiment {
@@ -114,8 +113,6 @@ func NewExperiment(path string, info *ExperimentInfo) *Experiment {
 		}
 	}
 
-	exp.Watch()
-
 	return exp
 }
 
@@ -133,7 +130,16 @@ func (e *Experiment) Get() gin.H {
 }
 
 func (e *Experiment) GetResult(objIndex int) *Result {
-	return e.Results[objIndex]
+	r, ok := e.Results[objIndex]
+	if !ok {
+		resultPath := filepath.Join(e.Path, fmt.Sprintf("debug_%d", objIndex))
+		if _, err := os.Stat(resultPath); err == nil {
+			r = NewResult(e.Path, objIndex, e)
+			e.Results[objIndex] = r
+		}
+	}
+
+	return r
 }
 
 func (e *Experiment) Update(info *ExperimentInfo) error {
@@ -157,65 +163,7 @@ func (e *Experiment) UpdatePath(newPath string) {
 		return
 	}
 	e.Path = newPath
-	e.Watch()
 	for _, result := range e.Results {
 		result.UpdateExpPath(e.Path)
 	}
-}
-
-func (e *Experiment) Refresh() {
-
-}
-
-func (e *Experiment) Watch() {
-	if e.Watcher == nil {
-		watcher, err := fsnotify.NewWatcher()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		e.Watcher = watcher
-
-		go func() {
-			defer func() {
-				e.Watcher.Close()
-				e.Watcher = nil
-			}()
-			for {
-				select {
-				case event, ok := <-watcher.Events:
-					if !ok {
-						return
-					}
-					if event.Has(fsnotify.Create) {
-						if index, ok := matchPcFolder(event.Name); ok {
-							if result, okk := e.Results[index]; okk {
-								result.WatchPcs()
-							} else {
-								e.Results[index] = NewResult(e.Path, index, e)
-							}
-						} else if index, _, ok := matchObjFile(event.Name); ok {
-							if result, okk := e.Results[index]; okk {
-								result.RefreshObjs()
-							} else {
-								e.Results[index] = NewResult(e.Path, index, e)
-							}
-						}
-					}
-				case err, ok := <-watcher.Errors:
-					if !ok {
-						return
-					}
-					log.Println("Error:", err)
-				}
-			}
-		}()
-	}
-
-	err := e.Watcher.Add(e.Path)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Printf("Experiment Watching: %s", e.Path)
 }
